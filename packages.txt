@@ -1,4 +1,6 @@
 tesseract-ocr
 tesseract-ocr-tha
 tesseract-ocr-eng
+tesseract-ocr-chi-sim
+tesseract-ocr-chi-tra
 libgl1
