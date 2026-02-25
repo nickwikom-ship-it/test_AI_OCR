@@ -4,7 +4,7 @@ import pytesseract
 import numpy as np
 from PIL import Image
 
-# --- การตั้งค่าหน้าเว็บ ---
+# --- Web Configuration ---
 st.set_page_config(page_title="AI Multi-Lang OCR Pro", layout="wide")
 
 st.markdown("""
@@ -16,30 +16,30 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("🔍 AI Multi-Language Text Scanner")
-st.write("เวอร์ชันอัปเกรด: เพิ่มระบบหมุนภาพตรงอัตโนมัติ และปุ่มสลับภาษา")
+st.write("Advanced Version: Noise Reduction & Deskewing for Better Accuracy")
 
-# --- ส่วนควบคุมหลักบนหน้าเว็บ (Main UI) ---
+# --- Main UI Controls ---
 col_lang, col_file = st.columns([1, 2])
 
 with col_lang:
-    # ปุ่มเปลี่ยนภาษาหลัก
+    # Language Selection on Main Page
     lang_options = {
-        "🇹🇭 ไทย + English": "tha+eng",
+        "🇹🇭 Thai + English": "tha+eng",
         "🇺🇸 English Only": "eng",
-        "🇨🇳 จีน (ตัวย่อ)": "chi_sim",
-        "🇭🇰 จีน (ตัวเต็ม)": "chi_tra"
+        "🇨🇳 Chinese (Simplified)": "chi_sim",
+        "🇭🇰 Chinese (Traditional)": "chi_tra"
     }
-    selected_option = st.selectbox("🌐 เลือกภาษาที่สแกน:", list(lang_options.keys()))
+    selected_option = st.selectbox("🌐 Select Target Language:", list(lang_options.keys()))
     selected_lang = lang_options[selected_option]
 
 with col_file:
-    uploaded_file = st.file_uploader("📂 อัปโหลดรูปภาพที่ต้องการสแกน...", type=["jpg", "jpeg", "png"])
+    uploaded_file = st.file_uploader("📂 Upload an image to scan...", type=["jpg", "jpeg", "png"])
 
-# --- Sidebar สำหรับปรับแต่งค่าเชิงลึก ---
-st.sidebar.header("🛠️ เครื่องมือปรับแต่งภาพ")
-upscale = st.sidebar.slider("ขยายขนาดภาพ (Upscale)", 1.0, 3.0, 1.5, 0.5)
-noise_level = st.sidebar.slider("ลบจุดรบกวน (Noise Removal)", 1, 7, 3, 2)
-auto_rotate = st.sidebar.checkbox("หมุนภาพให้ตรงอัตโนมัติ (Deskew)", value=True)
+# --- Sidebar for Advanced Settings ---
+st.sidebar.header("⚙️ Image Pre-processing")
+upscale_factor = st.sidebar.slider("Upscale Factor", 1.0, 3.0, 1.5, 0.5)
+clean_level = st.sidebar.slider("Noise Removal Level", 1, 7, 3, 2)
+auto_rotate = st.sidebar.checkbox("Auto Deskew (Rotate Straight)", value=True)
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
@@ -48,70 +48,80 @@ if uploaded_file is not None:
     col_src, col_proc = st.columns(2)
 
     with col_src:
-        st.subheader("🖼️ รูปต้นฉบับ")
+        st.subheader("🖼️ Original Image")
         st.image(image, use_container_width=True)
 
-    # --- ขั้นตอนการประมวลผล (Advanced Image Processing) ---
-    with st.spinner('กำลังปรับแต่งภาพให้ชัดเจน...'):
-        # 1. แปลงเป็นขาวดำ
+    # --- Advanced Cleaning Logic ---
+    with st.spinner('AI is cleaning the image...'):
+        # 1. Grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-
-        # 2. ขยายขนาดภาพ
-        if upscale > 1.0:
-            gray = cv2.resize(gray, None, fx=upscale, fy=upscale, interpolation=cv2.INTER_CUBIC)
-
-        # 3. หมุนภาพให้ตรง (Deskewing)
+        
+        # 2. Upscaling
+        if upscale_factor > 1.0:
+            gray = cv2.resize(gray, None, fx=upscale_factor, fy=upscale_factor, interpolation=cv2.INTER_CUBIC)
+        
+        # 3. Auto-Deskew
         if auto_rotate:
             coords = np.column_stack(np.where(gray < 127))
-            angle = cv2.minAreaRect(coords)[-1]
-            if angle < -45: angle = -(90 + angle)
-            else: angle = -angle
-            (h, w) = gray.shape[:2]
-            center = (w // 2, h // 2)
-            M = cv2.getRotationMatrix2D(center, angle, 1.0)
-            gray = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+            if coords.size > 0:
+                angle = cv2.minAreaRect(coords)[-1]
+                if angle < -45: angle = -(90 + angle)
+                else: angle = -angle
+                (h, w) = gray.shape[:2]
+                center = (w // 2, h // 2)
+                M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                gray = cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
-        # 4. ลดจุดรบกวนด้วย Bilateral Filter (รักษาขอบตัวอักษร)
+        # 4. Bilateral Filter (Smooth background while keeping edges sharp)
         gray = cv2.bilateralFilter(gray, 9, 75, 75)
 
-        # 5. ทำ Adaptive Threshold
+        # 5. Adaptive Thresholding (Handle shadows)
         binary = cv2.adaptiveThreshold(
             gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
             cv2.THRESH_BINARY, 21, 10
         )
 
-        # 6. Median Blur ลบจุดดำเล็กๆ (Noise)
-        processed_img = cv2.medianBlur(binary, noise_level)
+        # 6. Median Blur (Remove small dots/noise)
+        if clean_level > 1:
+            k_size = (clean_level // 2) * 2 + 1
+            processed_img = cv2.medianBlur(binary, k_size)
+        else:
+            processed_img = binary
 
     with col_proc:
-        st.subheader("✨ ภาพหลังปรับแต่ง (พร้อมสแกน)")
+        st.subheader("✨ Enhanced Image (Ready for OCR)")
         st.image(processed_img, use_container_width=True, channels="GRAY")
 
-    # --- ขั้นตอน OCR ---
+    # --- OCR Process ---
     st.divider()
-    with st.spinner(f'กำลังอ่านข้อความภาษา {selected_option}...'):
+    with st.spinner(f'Extracting {selected_option} text...'):
         try:
-            # --oem 3: Default (LSTM) | --psm 3: Auto page segmentation
-            config = r'--oem 3 --psm 3'
-            text = pytesseract.image_to_string(processed_img, lang=selected_lang, config=config)
+            # Config: OEM 3 (LSTM) | PSM 3 (Auto segmentation)
+            custom_config = r'--oem 3 --psm 3'
+            text = pytesseract.image_to_string(processed_img, lang=selected_lang, config=custom_config)
             
             if text.strip():
-                st.subheader(f"📄 ผลลัพธ์ข้อความ ({selected_option}):")
-                st.text_area("", text, height=450, label_visibility="collapsed")
+                st.subheader("📄 Scanned Result:")
+                st.text_area("OCR Output", text, height=450, label_visibility="collapsed")
                 
-                # ปุ่มดาวน์โหลดผลลัพธ์
+                # Download Button
                 st.download_button(
-                    label="📥 ดาวน์โหลดไฟล์ข้อความ (.txt)",
+                    label="📥 Download Result (.txt)",
                     data=text.encode('utf-8'),
                     file_name="ocr_result.txt",
                     mime="text/plain"
                 )
             else:
-                st.error("❌ AI ไม่พบข้อความที่ชัดเจน ลองปรับ 'Upscale' หรือ 'Noise Removal' ในแถบด้านข้าง")
+                st.error("⚠️ No text detected. Try adjusting 'Upscale' or 'Noise Removal' in the sidebar.")
         
         except Exception as e:
-            st.error(f"เกิดข้อผิดพลาด: {e}")
-            st.info("ตรวจสอบว่าได้ติดตั้งภาษาใน packages.txt ครบถ้วนแล้ว")
+            st.error(f"Error: {e}")
 
 else:
-    st.info("💡 เริ่มต้นใช้งานโดยการอัปโหลดรูปภาพที่ด้านบน")
+    st.info("💡 Get started by uploading an image from the top.")
+    with st.expander("Pro Tips for better results"):
+        st.write("""
+        1. **Language Match:** Ensure the selected language matches the text in your image.
+        2. **Upscale:** Use a higher upscale factor (2.0x+) if the text is very small.
+        3. **Noise Removal:** If the background is grainy, increase the noise removal level.
+        """)
